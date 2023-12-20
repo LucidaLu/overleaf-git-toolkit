@@ -1,0 +1,15 @@
+from helper import *
+
+
+FLAG_FILE = HOME_DIR + "/POST_UPDATE_FLAG"
+
+if not os.path.exists(FLAG_FILE):
+    logger.info(color("post-update", "green"))
+
+    run(["touch", FLAG_FILE])
+
+    handle_archived()
+
+    push_to_dropbox()
+
+    run(["rm", FLAG_FILE])

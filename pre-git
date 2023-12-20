@@ -1,0 +1,5 @@
+from helper import *
+
+if sys.argv[3] != "gitolite_master_key":
+    print(sys.argv, file=sys.stderr)
+    fetch_from_dropbox()
