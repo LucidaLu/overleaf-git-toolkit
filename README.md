@@ -11,7 +11,7 @@
 # Setup
 
 ## client side
-1. Generate a new key pair for ssh.
+1. Generate a new key pair for `gitolite`. Must be different from the one used for ssh.
 2. Edit `~/.ssh/config` and append the following entry:
 ```
 Host gitolite
@@ -22,7 +22,7 @@ Host gitolite
 ```
 
 ## server side
-1. Setup Dropbox.
+1. Setup [dropbox-headless](https://www.dropbox.com/install-linux).
 2. Clone this project. Write your newly generated key in `pubkey`.
 3. Modify contents in `install.py`.
 4. `python install.py`.
