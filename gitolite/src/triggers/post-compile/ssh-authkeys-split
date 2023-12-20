@@ -1,0 +1,87 @@
+#!/bin/bash
+
+#   split multi-key files into separate keys like ssh-authkeys likes
+
+# WHY
+# ---
+#
+# Yeah I wonder that too, when it's so much more maintainable to keep the damn
+# keys as sitaram@home.pub and sitaram@work.pub or such.  But there's no
+# accounting for tastes, and some old fogies apparently want to put all of a
+# user's keys into a single ".pub" file.
+
+# WARNINGS AND CAVEATS
+# --------------------
+#
+# - assumes no "@" sign in basenames of any multi-key files (single line file
+#   may still have them)
+
+# - assumes you don't have a subdir in keydir called "__split_keys__"
+
+# SUPPORT
+# -------
+#
+# NONE.
+
+# USAGE
+# -----
+#
+# to enable, uncomment the 'ssh-authkeys-split' line in the ENABLE list in the
+# rc file.
+
+cd $GL_ADMIN_BASE/keydir
+
+rm -rf __split_keys__
+mkdir __split_keys__
+export SKD=$PWD/__split_keys__
+
+# if we're coming from a gitolite-admin push, delete all *.multi, and rename
+# all multi-line *.pub to *.multi
+if [ "$GL_REPO" = "gitolite-admin" ] || [ "$GL_BYPASS_ACCESS_CHECKS" = "1" ]
+then
+    find . -type f -name "*.multi" | while read k
+    do
+        rm -f "$k"
+    done
+    find . -type f -name "*.pub" | while read k
+    do
+        # is this a multi-key?
+        lines=`wc -l < $k`
+        case $lines in
+            (0|1) continue
+        esac
+
+        base=`basename $k .pub`
+        mv $k $base.multi
+    done
+fi
+
+# now process *.multi
+find . -type f -name "*.multi" | while read k
+do
+    # do we need to split?
+    lines=`wc -l < $k`
+    case $lines in
+        (0|1) continue
+    esac
+
+    base=`basename $k .multi`
+    # sanity check
+    echo $base | grep '@' >/dev/null && continue
+
+    # ok do it
+    seq=0
+    while read line
+    do
+        (( seq++ ))
+        [ -z "$line" ] && continue
+        f=$SKD/$base@$seq.pub
+        echo "$line" > $f
+        # similar sanity check as main ssh-authkeys script
+        if ! ssh-keygen -l -f $f >/dev/null
+        then
+            echo 1>&2 "ssh-authkeys-split: bad line $seq in keydir/$k"
+            rm -f $f
+        fi
+    done < $k
+done

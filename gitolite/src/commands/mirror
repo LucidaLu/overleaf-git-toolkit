@@ -1,0 +1,186 @@
+#!/usr/bin/perl
+use strict;
+use warnings;
+
+my $tid;
+
+BEGIN {
+    $tid = $ENV{GL_TID} || 0;
+    delete $ENV{GL_TID};
+}
+
+use lib $ENV{GL_LIBDIR};
+use Gitolite::Rc;
+use Gitolite::Common;
+use Gitolite::Conf::Load;
+
+=for usage
+Usage 1:    gitolite mirror push <copy> <repo>
+            gitolite mirror status <copy> <repo>
+            gitolite mirror status all <repo>
+            gitolite mirror status all all
+Usage 2:    ssh git@master-server mirror push <copy> <repo>
+            ssh git@master-server mirror status <copy> <repo>
+
+Forces a push of one repo to one copy.
+
+Usage 1 is directly on the master server.  Nothing is checked; if the copy
+accepts it, the push happens, even if the copy is not in any copies
+option.  This is how you do delayed or lagged pushes to servers that do not
+need real-time updates or have bandwidth/connectivity issues.
+
+Usage 2 can be initiated by *any* user who has *any* gitolite access to the
+master server, but it checks that the copy is in one of the copies options
+before doing the push.
+
+MIRROR STATUS: The usage examples above show what can be done.  The 'status
+all <repo>' usage checks the status of all the copies defined for the given
+repo.  The 'status all all' usage is special, in that it only prints a list of
+repos that have *some* error, instead of dumping all the error info itself.
+
+SERVER LIST: 'gitolite mirror list master <reponame>' and 'gitolite mirror
+list copies <reponame>' will show you the name of the master server, and list
+the copy servers, for the repo.  They only work on the server command line
+(any server), but not remotely (from a normal user).
+=cut
+
+usage() if not @ARGV or $ARGV[0] eq '-h';
+
+_die "HOSTNAME not set" if not $rc{HOSTNAME};
+
+my ( $cmd, $host, $repo ) = @ARGV;
+$host = 'copies' if $host eq 'slaves';
+$repo =~ s/\.git$//;
+usage() if not $repo;
+
+if ( $cmd eq 'push' ) {
+    valid_copy( $host, $repo ) if exists $ENV{GL_USER};
+    # will die if host not in copies for repo
+
+    trace( 1, "TID=$tid host=$host repo=$repo", "gitolite mirror push started" );
+    _chdir( $rc{GL_REPO_BASE} );
+    _chdir("$repo.git");
+
+    if ( -f "gl-creator" ) {
+        # try to propagate the wild repo, including creator name and gl-perms
+        my $creator = `cat gl-creator`; chomp($creator);
+        trace( 1, `cat gl-perms 2>/dev/null | ssh $host CREATOR=$creator perms -c \\'$repo\\' 2>/dev/null` );
+    }
+
+    my $errors = 0;
+    my $glss = '';
+    for (`git push --mirror $host:$repo 2>&1`) {
+        $errors = 1 if $?;
+        print STDERR "$_" if -t STDERR or exists $ENV{GL_USER};
+        $glss .= $_;
+        chomp;
+        if (/FATAL/) {
+            $errors = 1;
+            gl_log( 'mirror', $_ );
+        } else {
+            trace( 1, "mirror: $_" );
+        }
+    }
+    # save the mirror push status for this copy if the word 'fatal' is found,
+    # else remove the status file.  We don't store "success" output messages;
+    # you can always get those from the log files if you really need them.
+    if ( $glss =~ /fatal/i ) {
+        my $glss_prefix = Gitolite::Common::gen_ts() . "\t$ENV{GL_TID}\t";
+        $glss =~ s/^/$glss_prefix/gm;
+        _print("gl-copy-$host.status", $glss);
+    } else {
+        unlink "gl-copy-$host.status";
+    }
+
+    exit $errors;
+} elsif ($cmd eq 'status') {
+    if (not exists $ENV{GL_USER} and $repo eq 'all') {
+        # this means 'gitolite mirror status all all'; in this case we only
+        # return a list of repos that *have* status files (indicating some
+        # problem).  It's upto you what you do with that list.  This is not
+        # allowed to be run remotely; far too wide ranging, sorry.
+        _chdir( $rc{GL_REPO_BASE} );
+        my $phy_repos = list_phy_repos(1);
+        for my $repo ( @{$phy_repos} ) {
+            my @x = glob("$rc{GL_REPO_BASE}/$repo.git/gl-copy-*.status");
+            print "$repo\n" if @x;
+        }
+        exit 0;
+    }
+
+    valid_copy( $host, $repo ) if exists $ENV{GL_USER};
+    # will die if host not in copies for repo
+
+    _chdir( $rc{GL_REPO_BASE} );
+    _chdir("$repo.git");
+
+    $host = '*' if $host eq 'all';
+    map { print_status($repo, $_) } sort glob("gl-copy-$host.status");
+} else {
+    # strictly speaking, we could allow some of the possible commands remotely
+    # also, at least for admins.  However, these commands are mainly intended
+    # for server-side scripting so I don't care.
+    usage() if $ENV{GL_USER};
+
+    server_side_commands(@ARGV);
+}
+
+# ----------------------------------------------------------------------
+
+sub valid_copy {
+    my ( $host, $repo ) = @_;
+    _die "invalid repo '$repo'" unless $repo =~ $REPONAME_PATT;
+
+    my %list = repo_copies($repo);
+    _die "'$host' not a valid copy for '$repo'" unless $list{$host};
+}
+
+sub repo_copies {
+    my $repo = shift;
+
+    my $ref = git_config( $repo, "^gitolite-options\\.mirror\\.copies.*" );
+    my %list = map { $_ => 1 } map { split } values %$ref;
+
+    return %list;
+}
+
+sub repo_master {
+    my $repo = shift;
+
+    my $ref = git_config( $repo, "^gitolite-options\\.mirror\\.master\$" );
+    my @list = map { split } values %$ref;
+    _die "'$repo' seems to have more than one master" if @list > 1;
+
+    return $list[0] || '';
+}
+
+sub print_status {
+    my $repo = shift;
+    my $file = shift;
+    return unless -f $file;
+    my $copy = $1 if $file =~ /^gl-copy-(.+)\.status$/;
+    print "----------\n";
+    print "WARNING: previous mirror push of repo '$repo' to host '$copy' failed, status is:\n";
+    print slurp($file);
+    print "----------\n";
+}
+
+# ----------------------------------------------------------------------
+# server side commands.  Very little error checking.
+#   gitolite mirror list master <repo>
+#   gitolite mirror list copies <repo>
+
+sub server_side_commands {
+    if ( $cmd eq 'list' ) {
+        if ( $host eq 'master' ) {
+            say repo_master($repo);
+        } elsif ( $host eq 'copies' ) {
+            my %list = repo_copies($repo);
+            say join( " ", sort keys %list );
+        } else {
+            _die "gitolite mirror list master|copies <reponame>";
+        }
+    } else {
+        _die "invalid command";
+    }
+}

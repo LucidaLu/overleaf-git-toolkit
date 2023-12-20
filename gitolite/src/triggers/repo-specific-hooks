@@ -1,0 +1,118 @@
+#!/usr/bin/perl
+use strict;
+use warnings;
+
+# setup repo-specific hooks
+
+use lib $ENV{GL_LIBDIR};
+use Gitolite::Rc;
+use Gitolite::Common;
+
+_die "repo-specific-hooks: LOCAL_CODE not defined in rc" unless $rc{LOCAL_CODE};
+_die "repo-specific-hooks: '$rc{LOCAL_CODE}/hooks/repo-specific' does not exist or is not a directory" unless -d "$rc{LOCAL_CODE}/hooks/repo-specific";
+
+_chdir( $ENV{GL_REPO_BASE} );
+
+if ($ARGV[0] eq 'POST_CREATE') {
+    # just the repo given in arg-2
+    @ARGV = ("gitolite git-config -ev -r $ARGV[1] gitolite-options\\.hook\\. |");
+} else {
+    # POST_COMPILE, all repos
+    @ARGV = ("gitolite list-phy-repos | gitolite git-config -ev -r % gitolite-options\\.hook\\. |");
+}
+
+my $driver = $rc{MULTI_HOOK_DRIVER} || "$rc{LOCAL_CODE}/hooks/multi-hook-driver";
+# Hook Driver
+{
+    local $/ = undef;
+    my $hook_text = <DATA>;
+    _print( $driver, $hook_text );
+    chmod 0755, $driver;
+}
+
+my %repo_hooks;
+while (<>) {
+    chomp;
+    my ( $repo, $hook, $codes ) = split /\t/, $_;
+    $codes ||= '';
+
+    # get the hook name
+    $hook =~ s/^gitolite-options\.hook\.//;
+    $hook =~ s/\..*//;
+
+    my @codes = split /\s+/, $codes;
+
+    # bail on disallowed hook types (but warn only if @codes is non-empty)
+    if ( $repo eq 'gitolite-admin' and $hook eq 'post-update' ) {
+        _warn "repo-specific-hooks: ignoring attempts to set post-update hook for the admin repo" if @codes;
+        next;
+    }
+    unless ( $hook =~ /^(pre-receive|post-receive|post-update|pre-auto-gc)$/ ) {
+        if (@codes) {
+            _warn "repo-specific-hooks: '$hook' is not allowed, ignoring";
+            _warn "    (only pre-receive, post-receive, post-update, and pre-auto-gc are allowed)";
+        }
+        next;
+    }
+
+    push @{ $repo_hooks{$repo}{$hook} }, @codes;
+}
+
+for my $repo (keys %repo_hooks) {
+    for my $hook (keys %{ $repo_hooks{$repo} }) {
+        my @codes = @{ $repo_hooks{$repo}{$hook} };
+
+        my $dst = "$repo.git/hooks/$hook";
+        unlink( glob("$dst.*") );
+
+        my $counter = "h00";
+        foreach my $code (@codes) {
+            if ( $code =~ m(^/|\.\.) ) {
+                _warn "repo-specific-hooks: double dot or leading slash not allowed in '$code'";
+                next;
+            }
+
+            my $src = $rc{LOCAL_CODE} . "/hooks/repo-specific/$code";
+
+            # if $code has slashes in it, flatten it for use in $dst, to avoid
+            # having to re-create those intermediate sub-directories
+            $code =~ s(/)(_)g;
+            my $dst = "$repo.git/hooks/$hook.$counter-$code";
+
+            unless ( -x $src ) {
+                _warn "repo-specific-hooks: '$src' doesn't exist or is not executable";
+                next;
+            }
+            unlink $dst;
+            symlink $src, $dst or _warn "could not symlink '$src' to '$dst'";
+            $counter++;
+
+            # no sanity checks for multiple overwrites of the same hook
+        }
+
+        unlink $dst;
+        symlink $driver, $dst or die "could not symlink '$driver' to '$dst'";
+    }
+}
+
+__DATA__
+#!/bin/sh
+
+# Determine what input the hook needs
+# post-update takes args, pre/post-receive take stdin
+type=args
+stdin=''
+[ $0 != hooks/post-update ] && {
+    type=stdin
+    stdin=`cat`
+}
+
+for h in $0.*; do
+    [ -x $h ] || continue
+    if [ $type = args ]
+    then
+        $h $@ || { [ $0 = hooks/pre-receive ] && exit 1; }
+    else
+        echo "$stdin" | $h || { [ $0 = hooks/pre-receive ] && exit 1; }
+    fi
+done

@@ -1,0 +1,61 @@
+#!/usr/bin/perl
+
+# update git-config entries in each repo
+# ----------------------------------------------------------------------
+
+use FindBin;
+
+use lib $ENV{GL_LIBDIR};
+use Gitolite::Rc;
+use Gitolite::Common;
+use Gitolite::Conf::Load;
+
+use strict;
+use warnings;
+
+my $RB = $rc{GL_REPO_BASE};
+_chdir($RB);
+
+# ----------------------------------------------------------------------
+# if called from POST_CREATE, we have only a single repo to worry about
+if ( @ARGV and $ARGV[0] eq 'POST_CREATE' ) {
+    my $repo = $ARGV[1];
+    fixup_config($repo);
+
+    exit 0;
+}
+
+# ----------------------------------------------------------------------
+# else it's all repos (i.e., called from POST_COMPILE)
+
+my $lpr = list_phy_repos();
+
+for my $pr (@$lpr) {
+    fixup_config($pr);
+}
+
+sub fixup_config {
+    my $pr      = shift;
+    my $creator = creator($pr);
+
+    my $gc = git_config( $pr, '.', 1 );
+    my $ac = `git config --file $RB/$pr.git/config -l`;
+    while ( my ( $key, $value ) = each( %{$gc} ) ) {
+        next if $key =~ /^gitolite-options\./;
+        $value =~ s/(@\w+)/expand_group($1)/ge if $rc{EXPAND_GROUPS_IN_CONFIG};
+        my $lkey = lc $key;
+        next if $ac =~ /^\Q$lkey\E=\Q$value\E$/m;
+        if ( $value ne "" ) {
+            system( "git", "config", "--file", "$RB/$pr.git/config", $key, $value );
+        } elsif ( $ac =~ /^\Q$lkey\E=/m ) {
+            system( "git", "config", "--file", "$RB/$pr.git/config", "--unset-all", $key );
+        }
+    }
+}
+
+sub expand_group {
+    my $g = shift;
+    my @m = @{ Gitolite::Conf::Load::list_members($1) };
+    return join(" ", @m) if @m;
+    return $g;
+}

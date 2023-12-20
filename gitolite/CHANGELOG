@@ -1,0 +1,306 @@
+2023-07-14  v3.6.13 only one important fix:
+
+                    remove the "description" file on new repos, to fix a bug
+                    created by an optimisation made 6 years ago in 3.6.8 (and
+                    was caught only in 2022 or so!)
+
+2020-08-04  v3.6.12 mirroring terminology changes
+
+                    install script can now modify #! lines when using a custom
+                    perl executable
+
+                    'config' user command allows for config values with spaces
+                    in them
+
+                    finally added notes in "t/README" on testing http mode and
+                    mirroring, with pre-build helpers for Fedora and Manjaro
+
+                    ...plus various bug fixes
+
+2019-01-08  v3.6.11 fix security issue in 'rsync' (bundle helper); see commit
+                    5df2b81 for more
+
+2018-09-30  v3.6.10 fix up boo-boo caused by previous release; see mails on
+                    list for details
+
+2018-08-07  v3.6.9  prevent racy access to repos in process of migration to
+                    gitolite
+
+                    'info' learns new '-p' option to show only physical repos
+                    (as opposed to wild repos)
+
+2018-07-12  v3.6.8  fix bug when deleting *all* hooks for a repo
+
+                    allow trailing slashes in repo names
+
+                    make pre-receive hook driver bail on non-zero exit of a
+                    pre-receive hook
+
+                    allow templates in gitolite.conf (new feature)
+
+                    various optimiations
+
+2017-07-02  v3.6.7  allow repo-specific hooks to be organised into
+                    subdirectories, and allow the multi-hook driver to be
+                    placed in some other location of your choice
+
+                    allow simple test code to be embedded within the
+                    gitolite.conf file; see contrib/utils/testconf for how.
+                    (This goes on the client side, not on the server)
+
+                    allow syslog "facility" to be changed, from the default of
+                    'local0'
+
+                    allow @group names in config values to be expanded; it is
+                    replaced with a space separated list of members
+
+2016-09-08  v3.6.6  simple but important fix for a future perl deprecation
+                    (perl will be removing "." from @INC in 5.24)
+
+                    'perms' now requires a '-c' to activate batch mode
+                    (should not affect interactive use but check your scripts
+                    perhaps?)
+
+                    gitolite setup now accepts a '-m' option to supply a
+                    custom message (useful when it is used by a script)
+
+2016-02-20  v3.6.5  allow creator check to be bypassed during mirroring
+
+                    handle new style ssh fingerprinting correctly (thanks to
+                    Robin Johnson)
+
+                    allow pre-auto-gc as a repo-specific hook
+
+                    optimise mirror pushes for heavily used repos
+
+                    create-with-reference trigger: on repo creation, setup
+                    objects/info/alternates for a server side alternate object
+                    store.
+
+                    'mirror status all all' prints a list of repos that have
+                    *some* error, which is arguably more useful for further
+                    action/processing
+
+                    allow incrementally adding more repo-specific hooks
+
+2015-11-01  v3.6.4  a ref-create bug in wild repos was fixed
+
+                    some contrib code related to AD integration, and to
+                    redmine user aliases
+
+                    teach Alias.pm a few new tricks
+
+                    remove a race condition in 'create' command that affected
+                    the 'default roles' setting
+
+                    make 'who-pushed' more efficient (local push logs, and
+                    'tip search')
+
+                    'gitolite query-rc' learns '-d' ('--dump') option
+
+2015-04-26  v3.6.3  allow limited use of 'git config' using the new 'config'
+                    command
+
+                    accept openssh 6.8's new fingerprint output format
+
+                    (finally!) allow limited symlinks within ~/repositories;
+                    see commit 8e36230 for details
+
+                    perms command now lists available roles
+
+                    minor backward compat breakage: 'perms -l repo' no longer
+                    works; see 'perms -h' for new usage
+
+                    allow gitolite-shell to be used as $SHELL (experts only;
+                    no support, no docs; see commit 9cd1e37 for details)
+
+                    help with 'git push --signed' using a post-receive hook to
+                    adopt push certs into 'refs/push-certs'; for details see
+                    contrib/hooks/repo-specific/save-push-signatures
+
+                    new 'transparent proxy' feature for git repos; see
+                    src/lib/Gitolite/Triggers/TProxy.pm for details
+
+2014-11-10  v3.6.2  disable ../ everywhere (see mailing list thread for
+                    details)
+
+                    VREF/NAME_NC -- like VREF/NAME but for new commits only.
+                    Details within src/VREF/NAME_NC.
+
+                    allow gitolite.conf to be tested locally; details within
+                    contrib/utils/gitolite-local
+
+2014-06-22  v3.6.1  experimental rc format convertor for "<= 3.3" users who
+                    have already upgraded the *code* to ">= v3.4".  Program is
+                    in contrib/utils.
+
+                    giving shell access to a few users got a lot easier (see
+                    comments in the rc file).
+
+                    allow logging to syslog as well (see comments in the rc
+                    file)
+
+                    new 'motd' command
+
+                    redis caching redone and now in core; see
+                    http://gitolite.com/gitolite/cache.html
+
+2014-05-09  v3.6    (cool stuff) the access command can now help you debug
+                    your rules / understand how a specific access decision was
+                    arrived at.
+
+                    mirroring: since mirroring is asynchronous (by default
+                    anyway), when a 'git push --mirror' fails, you may not
+                    know it unless you look in the log file on the server.
+                    Now gitolite captures the info and -- if the word 'fatal'
+                    appears anywhere within it, it saves the entire output and
+                    prints it to STDERR for anyone who reads or writes the
+                    repo on the *master* server, until the error condition
+                    clears up.
+
+                    mirroring: allow 'nosync' slaves -- no attempt to
+                    automatically push to these slaves will be made.  Instead,
+                    you have to manually (or via cron, etc) trigger pushes.
+
+                    (backward compat breakage) the old v2 syntax for
+                    specifying gitweb owner and description is no longer
+                    supported.
+
+                    macros now allow strings as arguments (thanks to Jason
+                    Donenfeld for the idea/problem).
+
+                    the 'info' command can print in JSON format if asked to.
+
+                    repo-specific hooks: now you can specify more than one,
+                    and gitolite runs all of them in sequence.
+
+                    new trigger 'expand-deny-messages' to show more details
+                    when access is denied.
+
+                    git-annex support is finally in master, yaaay!
+
+                    new 'readme' command, modelled after 'desc'.  Apparently
+                    gitweb can use a README.html file in the *bare* repo
+                    directory -- who knew!
+
+2013-10-14  v3.5.3  catch undefined groupnames (when possible)
+
+                    mirroring: async push to slaves
+
+                    (some portability fixes)
+
+                    (a couple of contrib scripts - querying IPA based LDAP
+                    servers for group membership, and user key management)
+
+                    allow groups in subconf files (this *may* slow down
+                    compilation in extreme cases)
+
+                    make adding repo-specific hooks easier (see cust.mkd or
+                    cust.html online for docs)
+
+                    smart http now supports git 1.8.2 and above (which changed
+                    the protocol requirements a wee bit)
+
+2013-07-10  v3.5.2  allow ENV vars to be set from repo options, for use in
+                    triggers and hooks
+
+                    bug-fix: the new set-default-roles feature was being
+                    invoked on every run of "perms" and overriding it!
+
+2013-03-24  v3.5    (2 minor backward compat breakages)
+                    1.  'DEFAULT_ROLE_PERMS' replaced by per repo
+                        'default.roles' option
+                    2.  'gitolite list-memberships' now requires a '-r' or a
+                        '-u' flag
+
+                    new 'gitolite owns' command (thanks to Kevin Pulo)
+
+2013-03-05  v3.4    new rc file format makes it much easier to enable specific
+                    features
+
+2012-12-29  v3.3    bug fix: gl-perms propagation to slaves broke sometime
+                    after v3.2 (so if you're only picking up tagged releases
+                    you're OK)
+
+                    the "D" command now allows rm/unlock to be totally
+                    disabled
+
+                    new trigger: update-gitweb-daemon-from-options; another
+                    way to update gitweb and daemon access lists
+
+                    new 'create' command for explicit wild repo creation, and
+                    new AutoCreate trigger to control auto-creation
+
+                    allow simple macros in conf file
+
+2012-11-14  v3.2    major efficiency boost for large setups
+
+                    optional support for multi-line pubkeys; see
+                    src/triggers/post-compile/ssh-authkeys-split
+
+                    bug fix for not creating gl-conf when repo para has only
+                    config lines and no access rules
+
+                    new 'bg' trigger command to put long jobs started from a
+                    trigger into background
+
+                    %GL_REPO and %GL_CREATOR now work for 'option's also
+
+                    test suite now much more BSD friendly
+
+2012-10-05  v3.1    (security) fix path traversal on wild repos
+
+                    new %GL_CREATOR variable for git-config lines
+
+                    rsync command to create and send bundles automagically
+
+                    migrated 'who-pushed'
+
+                    logical expressions on refexes!!!
+
+2012-06-27  v3.04   documentation graduated and moved out of parents house :)
+
+                    new trigger for 'repo specific umask'
+
+                    new 'list-dangling-repos' command
+
+                    new LOCAL_CODE rc var; allow admin specified programs to
+                    override system-installed ones
+
+                    new 'upstream' trigger-cum-command to maintain local
+                    copies of external repos
+
+                    new 'sudo' command
+
+                    minor backward compat breakage in 'gitolite query-rc'
+
+                    'perms' command can now create repo if needed
+
+                    migrated 'symbolic-ref' command
+
+                    'gitolite setup --hooks-only'
+
+2012-05-23  v3.03   fix major bug that allowed an admin to get a shell
+
+2012-05-20  v3.02   packaging instructions fixed up and smoke tested
+
+                    make it easier to give some users a full shell
+
+                    allow aliasing a repo to another name
+
+                    simulate POST_CREATE for new normal (non-wild) repos
+
+                    (just for kicks) a VREF that allows for voting on changes
+                    to a branch
+
+                    bug fix: smart http was not running PRE_ and POST_GIT
+                    triggers
+
+                    htpasswd migrated
+
+2012-04-29  v3.01   mostly BSD and Solaris compat
+                    also fork command added
+
+2012-04-18  v3.0    first release to "master"
+                    This is a compete rewrite of gitolite; please see
+                    documentation before upgrading.

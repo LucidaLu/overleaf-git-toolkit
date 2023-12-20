@@ -1,0 +1,193 @@
+#!/usr/bin/perl
+use strict;
+use warnings;
+
+use lib $ENV{GL_LIBDIR};
+use Gitolite::Rc;
+use Gitolite::Common;
+use Gitolite::Easy;
+
+=for usage
+perms -- list or set permissions for user-created ("wild") repo.
+
+Usage summary:
+    ssh git@host perms <repo> -l
+        # list current permissions on repo
+    ssh git@host perms <repo> -lr
+        # list available roles and their access rights
+
+    ssh git@host perms <repo> + <rolename> <username>
+        # change permissions: add a user to a role
+    ssh git@host perms <repo> - <rolename> <username>
+        # change permissions: remove a user from a role
+
+Examples:
+    ssh git@host perms my/repo + READERS alice
+    ssh git@host perms my/repo + WRITERS bob
+
+----
+There is also a batch mode useful for scripting and bulk loading; see the
+source code of the perms command for details.
+=cut
+
+# BATCH MODE: DO NOT combine this with the +/- mode above.  This mode also
+# creates the repo if it does not already exist (assuming $GL_USER has
+# permissions to create it).
+#
+# Example:
+#     cat copy-of-backed-up-gl-perms | ssh git@host perms -c <repo>
+
+usage() if not @ARGV or $ARGV[0] eq '-h' or @ARGV < 2;
+
+$ENV{GL_USER} or _die "GL_USER not set";
+
+my $generic_error = "repo does not exist, or you are not authorised";
+
+if ( $ARGV[1] eq '-l' ) {
+    getperms($ARGV[0]);    # doesn't return
+}
+
+# auto-create the repo if -c passed and repo doesn't exist
+if ( $ARGV[0] eq '-c' ) {
+    shift;
+    my $repo = $ARGV[0] or usage();
+    _die "invalid repo '$repo'" unless $repo =~ $REPONAME_PATT;
+
+    if ( not -d "$rc{GL_REPO_BASE}/$repo.git" ) {
+        unless ($ENV{GL_BYPASS_CREATOR_CHECK}) {
+            my $ret = Gitolite::Conf::Load::access( $repo, $ENV{GL_USER}, '^C', 'any' );
+            _die $generic_error if $ret =~ /DENIED/;
+        }
+
+        require Gitolite::Conf::Store;
+        Gitolite::Conf::Store->import;
+        new_wild_repo( $repo, $ENV{GL_USER}, 'perms-c' );
+        gl_log( 'create', $repo, $ENV{GL_USER}, 'perms-c' );
+    }
+}
+
+my $repo = shift;
+
+if ( @ARGV and $ARGV[0] eq '-lr' ) {
+    list_roles();
+    exit 0;
+} else {
+    setperms(@ARGV);
+}
+
+# cache control
+if ($rc{CACHE}) {
+    require Gitolite::Cache;
+    Gitolite::Cache::cache_control('flush', $repo);
+}
+
+_system( "gitolite", "trigger", "POST_CREATE", $repo, $ENV{GL_USER}, 'perms' );
+
+# ----------------------------------------------------------------------
+
+sub getperms {
+    my $repo = shift;
+    _die $generic_error if not owns($repo);
+    my $pf = "$rc{GL_REPO_BASE}/$repo.git/gl-perms";
+
+    print slurp($pf) if -f $pf;
+
+    exit 0;
+}
+
+sub setperms {
+    _die $generic_error if not owns($repo);
+    my $pf = "$rc{GL_REPO_BASE}/$repo.git/gl-perms";
+
+    if ( not @_ ) {
+        # legacy mode; pipe data in
+        print STDERR "'batch' mode started, waiting for input (run with '-h' for details).\n";
+        print STDERR "Please enter 'cancel' to abort if you did not intend to do this.\n";
+        @ARGV = ();
+        my @a;
+        while (<>) {
+            _die "CANCELLED" if /^\s*cancel\s*$/i;
+            invalid_role($1) if /(\S+)/ and not $rc{ROLES}{$1};
+            push @a, $_;
+        }
+
+        _print( $pf, @a );
+        return;
+    }
+
+    _die "Invalid syntax.  Please re-run with '-h' for detailed usage" if @_ != 3;
+    my ( $op, $role, $user ) = @_;
+    _die "Invalid syntax.  Please re-run with '-h' for detailed usage" if $op ne '+' and $op ne '-';
+    _die "Invalid user '$user'"                                        if not $user =~ $USERNAME_PATT;
+
+    my $text = '';
+    my @text = slurp($pf) if -f $pf;
+
+    my $present = grep { $_ eq "$role $user\n" } @text;
+
+    if ( $op eq '-' ) {
+        if ( not $present ) {
+            _warn "'$role $user' was not present in file";
+        } else {
+            @text = grep { $_ ne "$role $user\n" } @text;
+            _print( $pf, @text );
+        }
+    } else {
+        invalid_role($role) unless grep { $_->[3] eq $role } load_roles();
+        if ($present) {
+            _warn "'$role $user' already present in file";
+        } else {
+            push @text, "$role $user\n";
+            @text = sort @text;
+            _print( $pf, @text );
+        }
+    }
+}
+
+my @rules;
+
+sub load_roles {
+    return @rules if @rules;
+
+    require Gitolite::Conf::Load;
+    Gitolite::Conf::Load::load($repo);
+
+    my %repos = %Gitolite::Conf::Load::repos;
+    my @repo_memberships = Gitolite::Conf::Load::memberships('repo', $repo);
+
+    for my $rp (@repo_memberships) {
+        my $hr = $repos{$rp};
+        for my $r ( keys %$hr ) {
+            next unless $r =~ s/^@//;
+            next unless $rc{ROLES}{$r};
+            map { $_->[3] = $r } @{ $hr->{"\@$r"} };
+            push @rules, @{ $hr->{"\@$r"} };
+        }
+    }
+    return @rules;
+}
+
+sub invalid_role {
+    my $role = shift;
+
+    print STDERR "Invalid role '$role'; valid roles for this repo:\n";
+    open(STDOUT, '>&', \*STDERR);   # make list_roles print to STDERR
+    list_roles();
+    exit 1;
+}
+
+sub list_roles {
+
+    my @rules = sort { $a->[0] <=> $b->[0] } load_roles();
+
+    for (@rules) {
+        $_->[2] =~ s(^refs/heads/)();
+        $_->[2] = '--any--' if $_->[2] eq 'refs/.*';
+    }
+
+    my $max = 0;
+    map { $max = $_ if $_ > $max } map { length($_->[2]) } @rules;
+    printf("\t%s\t%*s\t \t%s\n", "perm",  -$max, "ref",   "role");
+    printf("\t%s\t%*s\t \t%s\n", "----",  -$max, "---",   "----");
+    printf("\t%s\t%*s\t=\t%s\n", $_->[1], -$max, $_->[2], $_->[3]) for @rules;
+}

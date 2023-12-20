@@ -1,0 +1,54 @@
+#!/usr/bin/perl
+use strict;
+use warnings;
+
+use lib $ENV{GL_LIBDIR};
+use Gitolite::Easy;
+
+# README.html files work similar to "description" files. For further
+# information see
+#   https://www.kernel.org/pub/software/scm/git/docs/gitweb.html
+# under "Per-repository gitweb configuration".
+
+=for usage
+Usage:    ssh git@host readme <repo>
+          ssh git@host readme <repo> rm
+          cat <filename> | ssh git@host readme <repo> set
+
+Show, remove or set the README.html file for repo.
+
+You need to have write access to the repo and the 'writer-is-owner' option
+must be set for the repo, or it must be a user-created ('wild') repo and you
+must be the owner.
+=cut
+
+usage() if not @ARGV or @ARGV < 1 or $ARGV[0] eq '-h';
+
+my $repo = shift;
+my $op = shift || '';
+usage() if $op and $op ne 'rm' and $op ne 'set';
+my $file = 'README.html';
+
+#<<<
+_die "you are not authorized" unless
+    ( not $op and can_read($repo) )   or
+    (     $op and owns($repo) )       or
+    (     $op and can_write($repo)    and option( $repo, 'writer-is-owner' ) );
+#>>>
+
+if ( $op eq 'rm' ) {
+    unlink "$rc{GL_REPO_BASE}/$repo.git/$file";
+} elsif ( $op eq 'set' ) {
+    textfile( file => $file, repo => $repo, prompt => '' );
+} else {
+    print textfile( file => $file, repo => $repo );
+}
+
+__END__
+
+The WRITER_CAN_UPDATE_README option is gone now; it applies to all the repos
+in the system.  Much better to add 'option writer-is-owner = 1' to repos or
+repo groups that you want this to apply to.
+
+This option is meant to cover desc, readme, and any other repo-specific text
+file, so it's also a blunt instrument, though in a different dimension :-)

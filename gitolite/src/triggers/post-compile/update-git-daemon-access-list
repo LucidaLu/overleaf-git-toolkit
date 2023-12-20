@@ -1,0 +1,40 @@
+#!/usr/bin/perl
+
+# update git-daemon-export-ok files in each repo
+# ----------------------------------------------------------------------
+
+use lib $ENV{GL_LIBDIR};
+use Gitolite::Rc;
+use Gitolite::Easy;
+use Gitolite::Common;
+
+use strict;
+use warnings;
+
+my $EO = "git-daemon-export-ok";
+my $RB = $rc{GL_REPO_BASE};
+
+my $cmd = "gitolite list-phy-repos";
+if ( @ARGV and $ARGV[0] eq 'POST_CREATE' ) {
+    # only one repo to do
+    $cmd = "echo $ARGV[1]";
+}
+
+for my $d (`$cmd | gitolite access % daemon R any`) {
+    my @F = split "\t", $d;
+    if ($F[2] =~ /DENIED/) {
+        unlink "$RB/$F[0].git/$EO";
+    } elsif (! -f "$RB/$F[0].git/$EO") {
+        textfile( file => $EO, repo => $F[0], text => "" );
+    }
+}
+
+# As a quick recap, the gitolite output looks somewhat like this:
+
+#   bar^Idaemon^IR any bar daemon DENIED by fallthru$
+#   foo^Idaemon^Irefs/.*$
+#   fubar^Idaemon^Irefs/.*$
+#   gitolite-admin^Idaemon^IR any gitolite-admin daemon DENIED by fallthru$
+#   testing^Idaemon^Irefs/.*$
+
+# where I've typed "^I" to denote a tab.

@@ -1,0 +1,51 @@
+#!/usr/bin/perl
+use strict;
+use warnings;
+
+use lib $ENV{GL_LIBDIR};
+use Gitolite::Rc;
+use Gitolite::Common;
+
+$|++;
+
+my $akfile = "$ENV{HOME}/.ssh/authorized_keys";
+
+# ----------------------------------------------------------------------
+
+my $aktext = slurp($akfile);
+
+for my $su ( shell_users() ) {
+    $aktext =~ s(/gitolite-shell $su([" ].*?),no-pty )(/gitolite-shell -s $su$1 )g;
+}
+
+_print( $akfile, $aktext );
+
+# two methods to specify list of shell-capable users.  (1) list of usernames
+# as arguments to 'Shell' in rc file, (2) list of usernames in a plain text
+# file whose name is the first argument to 'Shell' in the rc file.  Or both!
+sub shell_users {
+    my ($sufile, @ret);
+
+    # backward compat for 3.6 and below.  This code will be removed in 3.7.
+    # Also, the variable is ignored if you end up using the new variant (i.e.,
+    # put a file name on the 'Shell' line itself).
+    $sufile = $rc{SHELL_USERS_LIST} if $rc{SHELL_USERS_LIST} and -r $rc{SHELL_USERS_LIST};
+
+    $sufile = shift @ARGV if @ARGV and -r $ARGV[0];
+
+    if ($sufile) {
+        @ret = grep { not /^#/ } slurp($sufile);
+        chomp(@ret);
+    }
+
+    for my $u (@ARGV) {
+        # arguments placed in the rc file appear before the trigger name
+        last if $u eq 'POST_COMPILE';
+
+        push @ret, $u;
+        # no sanity checking, since the rc file can only be created by someone
+        # who already has shell access
+    }
+    _die "'Shell': enabled but no usernames supplied" unless @ret;
+    return @ret;
+}

@@ -1,0 +1,139 @@
+#!/usr/bin/perl -s
+use strict;
+use warnings;
+
+# DESCRIPTION:
+
+#   This program is meant to re-compile the access rules (and 'config' or
+#   'option' lines) of exactly ONE actual repo (i.e., not a repo group or a
+#   repo pattern).
+
+# MOTIVATION:
+
+#   Fedora has a huge number of repos, as well as lot of churn in permissions.
+#   The combination of having a large conf *and* frequent compiles were not
+#   working out, hence this solution.  Not sure if any others have such a
+#   situation, so it's a standalone program, separate from "core" gitolite,
+#   shipped in "contrib" instead of "src".
+
+# SETUP:
+
+#   It expects to run as a gitolite sub-command, which means you will need to
+#   copy it from contrib to src/commands, or the equivalent location inside
+#   LOCAL_CODE; see non-core.html in the docs for details.
+
+# INVOCATION:
+
+#   It takes one argument: the name of a file that contains the new ruleset
+#   you want to use.  (This cannot be STDIN or "-" or something).
+
+#   example:
+#
+#       gitolite compile-1 <file-containing-rules-for-exactly-one-repo>
+
+# WARNING:
+
+#   If the main gitolite.conf changes significantly (specifically, if the
+#   number of effective rules in it increase quite a bit), you may have to run
+#   this command on ALL repos to update their individual gl-conf files.
+#
+#   (TBD: explain this in more concrete terms)
+
+# ----------------------------------------------------------------------
+# THERE IS NO ERROR CHECKING ON THE WARNING ABOVE, NOR ON THE ASSUMPTIONS AND
+# REQUIREMENTS BELOW.  PLEASE USE CAREFULLY!
+# ----------------------------------------------------------------------
+
+# ASSUMPTIONS/REQUIREMENTS:
+
+#   The file given must contain exactly one 'repo' line, with exactly one repo
+#   name, followed by the rules, configs, and options for that repo in the
+#   normal gitolite.conf syntax.
+
+#   The file must not have any group definitions, though it may use group
+#   definitions already setup in the main gitolite.conf file.
+
+#   Rules for this repo need not be already defined in the main gitolite.conf.
+#   If they are, they will cease to have any effect once you run this command
+#   - only the rules you supply in the file passed to this command will apply,
+#   and they will be considered to be placed at the end of gitolite.conf.
+
+#   If the repo does not exist, it must be first created using:
+#
+#       GL_USER=admin gitolite create <reponame>
+#
+#   where <reponame> is the gitolite-style name (i.e., "foo", not "foo.git" or
+#   "~/repositories/foo" or "~/repositories/foo.git")
+#
+#   This, of course, requires the main gitolite.conf to have the following
+#   lines at the top:
+#
+#       repo [A-Za-z].*
+#           C   =   admin
+
+#   Any change to the main gitolite.conf is followed by a full 'gitolite
+#   compile'; i.e., ~/.gitolite/conf/gitolite.conf-compiled.pm, the main
+#   "compiled" conf file, is consistent with the latest gitolite.conf.
+
+use 5.10.0;
+use Data::Dumper;
+
+use lib $ENV{GL_LIBDIR};
+use Gitolite::Rc;
+use Gitolite::Common;
+use Gitolite::Conf;
+use Gitolite::Conf::Store;
+use Gitolite::Conf::Sugar;
+
+my ($cf, $repo) = args();       # conffile from @ARGV, repo from first line of conffile
+my $startseq = getseq();        # get the starting sequence number by looking in the (common) compiled conf file
+parse_and_store($cf, $repo);    # parse the ruleset and write out just the gl-conf file
+                                # (this is the only part that uses core gitolite functions)
+update_seq($repo, $startseq);   # update gl-conf with adjusted sequence numbers
+
+exit 0;
+
+# ----------------------------------------------------------------------
+
+sub args {
+    my $cf = shift @ARGV or _die "need conffile";
+    $cf = $ENV{PWD} . "/" . $cf unless $cf =~ m(^/);
+
+    my $t = slurp($cf);
+    _die "bad conf file" unless $t =~ /^\s*repo\s+(\S+)\s*$/m;
+    my $repo = $1;
+
+    return ($cf, $repo);
+}
+
+sub getseq {
+    my @main_cc = slurp "$rc{GL_ADMIN_BASE}/conf/gitolite.conf-compiled.pm";
+    my $max = 0;
+    for (@main_cc) {
+        $max = $1 if m/^ +(\d+),$/ and $max < $1;
+    }
+
+    return $max;
+}
+
+sub parse_and_store {
+    my ($cf, $repo) = @_;
+
+    parse(sugar($cf));
+    _chdir( $rc{GL_REPO_BASE} );
+    Gitolite::Conf::Store::store_1($repo);
+}
+
+sub update_seq {
+    my ($repo, $startseq) = @_;
+
+    _chdir("$rc{GL_REPO_BASE}/$repo.git");
+    my $text = slurp("gl-conf");
+
+    $startseq+=1000;
+    # just for safety, in case someone adds a few rules to the main conf later, but neglects to update repo confs
+
+    $text =~ s/^( +)(\d+),$/"$1" . ($2+$startseq) . ","/gme;
+
+    _print("gl-conf", $text);
+}

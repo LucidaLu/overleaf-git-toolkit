@@ -1,0 +1,51 @@
+#!/bin/sh
+
+# TODO: look at the commit in which *this* line was added, and see the changes
+# to the other scripts.  We need to make those changes here also, but I'm too
+# lazy right now.  Plus I'm not even sure if anyone is using this!
+
+# Update git-daemon and gitweb access using 'option' lines instead of special
+# usernames.
+
+# To use:
+
+# * enable this combined updater in the rc file by removing the other two
+#   update-*-access-list entries and inserting this one instead.  (This would
+#   be in the POST_CREATE and POST_COMPILE lists).
+
+# * the add option lines in the conf file, like this:
+#
+#       repo foo @bar
+#           option daemon = 1
+#           option gitweb = 1
+
+# Note: don't forget that gitweb can also be enabled by actual config
+# variables (gitweb.owner, gitweb.description, gitweb.category)
+
+# This is useful for people who don't like '@all' to be literally *all* users,
+# including gitweb and daemon, and can't/won't use deny-rules properly.
+
+# first do the gitweb stuff
+
+plf=`gitolite query-rc GITWEB_PROJECTS_LIST`
+[ -z "$plf" ] && plf=$HOME/projects.list
+
+(
+    gitolite list-phy-repos | gitolite git-config % gitolite-options.gitweb
+    gitolite list-phy-repos | gitolite git-config -r % gitweb\\.
+) |
+    cut -f1 | sort -u | sed -e 's/$/.git/' > $plf
+
+# now deal with git-daemon
+
+EO=git-daemon-export-ok
+RB=`gitolite query-rc GL_REPO_BASE`
+export EO RB
+
+export tmp=$(mktemp -d)
+trap "rm -rf $tmp" 0
+
+gitolite list-phy-repos | sort | tee $tmp/all | gitolite git-config % gitolite-options.daemon | cut -f1 > $tmp/daemon
+
+comm -23 $tmp/all $tmp/daemon | perl -lne 'unlink "$ENV{RB}/$_.git/$ENV{EO}"'
+cat               $tmp/daemon | perl -I"$GL_LIBDIR" -MGitolite::Easy -lne 'textfile( file => $ENV{EO}, repo => $_, text => "");'
